@@ -1,0 +1,17 @@
+.venv
+chroma_data
+.env
+.git
+.github
+chart
+tests
+examples
+notebooks
+papers
+img
+*.png
+node_modules
+frontends/webcomponent/dist
+frontends/webcomponent/node_modules
+__pycache__
+*.pyc

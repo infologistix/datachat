@@ -1,0 +1,52 @@
+{{- if .Values.training.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "datachat.fullname" . }}-train
+  labels:
+    {{- include "datachat.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        {{- include "datachat.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "datachat.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: train
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required (set it to the git SHA the CI workflow built)" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "train.py", "--fresh"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "datachat.fullname" . }}
+            - secretRef:
+                name: {{ .Values.secrets.name }}
+          resources:
+            {{- toYaml .Values.training.resources | nindent 12 }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /app/chroma_data
+          {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: {{ include "datachat.fullname" . }}-chroma
+      {{- end }}
+{{- end }}

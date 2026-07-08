@@ -1,0 +1,35 @@
+{{- if .Values.istio.enabled }}
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "datachat.fullname" . }}-allow-namespace
+  labels:
+    {{- include "datachat.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "datachat.selectorLabels" . | nindent 6 }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/{{ .Release.Namespace }}/sa/*"
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "datachat.fullname" . }}-allow-ingress
+  labels:
+    {{- include "datachat.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "datachat.selectorLabels" . | nindent 6 }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
+{{- end }}

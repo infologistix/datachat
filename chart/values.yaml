@@ -1,0 +1,108 @@
+# Default values for datachat.
+
+replicaCount: 1
+
+image:
+  repository: europe-west3-docker.pkg.dev/platform-app-ilx/docker-image-repository/datachat
+  pullPolicy: IfNotPresent
+  # Image tags are the git commit SHA the docker-image-CI workflow built from
+  # (no "latest" - set this explicitly on every install/upgrade).
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+  runAsNonRoot: true
+
+service:
+  type: ClusterIP
+  port: 8084
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 100m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 15
+  timeoutSeconds: 5
+  periodSeconds: 30
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  periodSeconds: 15
+  failureThreshold: 3
+
+# Persists ChromaDB data (schema/docs embeddings) across restarts.
+# Single ReadWriteOnce volume -> replicaCount must stay at 1.
+persistence:
+  enabled: true
+  storageClassName: standard
+  size: 5Gi
+
+# Non-secret configuration, rendered into a ConfigMap and loaded via envFrom.
+env:
+  llmProvider: openai
+  openaiModel: qwen3.6-35b-a3b
+  openaiBaseUrl: http://litellm.litellm.svc.cluster.local:4000/v1
+  postgresHost: ""
+  postgresPort: "5432"
+  postgresDatabase: ""
+  postgresUser: ""
+
+# Secrets are NOT created by this chart - create them in the target namespace
+# before installing, e.g.:
+#   kubectl create secret generic datachat-secrets \
+#     --from-literal=OPENAI_API_KEY=<litellm-virtual-key> \
+#     --from-literal=POSTGRES_PASSWORD=<postgres-password>
+secrets:
+  name: datachat-secrets
+  openaiApiKeyKey: OPENAI_API_KEY
+  postgresPasswordKey: POSTGRES_PASSWORD
+
+# Runs `python train.py --fresh` as a Helm hook Job before each install/upgrade,
+# so schema embeddings are refreshed without baking training into pod startup.
+training:
+  enabled: false
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Istio resources (VirtualService, AuthorizationPolicy) - off by default for manual
+# testing; enable once the app is wired up behind the ingress gateway.
+istio:
+  enabled: false
+  host: datachat.kubespectra.internal
+  gateway: istio-system/istio-ingress-gateway

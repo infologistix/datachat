@@ -1,0 +1,7 @@
+apiVersion: v2
+name: datachat
+description: A Helm chart for DataChat, a self-hosted text-to-SQL chat interface (vanna-ai fork)
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -18,6 +18,7 @@ from vanna.core.user.resolver import UserResolver
 from vanna.core.user.request_context import RequestContext
 from vanna.integrations.google.gemini import GeminiLlmService
 from vanna.integrations.ollama.llm import OllamaLlmService
+from vanna.integrations.openai.llm import OpenAILlmService
 from vanna.integrations.chromadb.agent_memory import ChromaAgentMemory
 from vanna.integrations.postgres.sql_runner import PostgresRunner
 from vanna.integrations.bigquery.sql_runner import BigQueryRunner
@@ -51,6 +52,13 @@ def create_app() -> FastAPI:
         llm = OllamaLlmService(
             model=os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
             host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+        )
+    elif provider == "openai":
+        # Also used for any OpenAI-compatible endpoint (e.g. LiteLLM proxy in front of vLLM).
+        llm = OpenAILlmService(
+            model=os.getenv("OPENAI_MODEL", "gpt-5"),
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_BASE_URL"),
         )
     else:
         llm = GeminiLlmService(
