@@ -28,7 +28,8 @@ COPY --from=frontend-build /app/frontends/webcomponent/dist ./frontends/webcompo
 
 ENV HOST=0.0.0.0 \
     PORT=8084 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    HOME=/tmp
 
 EXPOSE 8084
 

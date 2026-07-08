@@ -38,8 +38,10 @@ service:
 
 resources:
   limits:
+    # Namespace ResourceQuota caps limits.memory at 2Gi total, and the injected
+    # istio-proxy sidecar takes ~256Mi of that - leave it headroom.
     cpu: 1000m
-    memory: 2Gi
+    memory: 1536Mi
   requests:
     cpu: 100m
     memory: 512Mi
