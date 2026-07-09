@@ -123,11 +123,14 @@ class FileSystem(ABC):
 class LocalFileSystem(FileSystem):
     """Local file system implementation with per-user isolation."""
 
-    def __init__(self, working_directory: str = "."):
+    def __init__(self, working_directory: str = "/tmp/vanna_files"):
         """Initialize with a working directory.
 
         Args:
-            working_directory: Base directory where user-specific folders will be created
+            working_directory: Base directory where user-specific folders will be created.
+                Defaults to a directory under /tmp since the current working directory
+                is not guaranteed to be writable (e.g. when running as a non-root
+                container user against a read-only application root).
         """
         self.working_directory = Path(working_directory)
 
