@@ -1841,6 +1841,16 @@ export class ComponentManager {
   private elements: Map<string, HTMLElement> = new Map();
   private registry: ComponentRegistry = new ComponentRegistry();
   private container: HTMLElement;
+
+  // Per-turn state: technical components (SQL status cards, dataframes, charts, ...)
+  // are buffered into a collapsible "Technical details" panel instead of being shown
+  // inline, so the final answer can appear directly below the user's question.
+  private turnActive = false;
+  private turnAnswerRendered = false;
+  private expectFinalAnswer = false;
+  private technicalWrapper: HTMLElement | null = null;
+  private technicalContent: HTMLElement | null = null;
+
   private readonly sharedFields = new Set([
     'id',
     'type',
@@ -1889,8 +1899,82 @@ export class ComponentManager {
     this.components.set(component.id, component);
     this.elements.set(component.id, element);
 
-    // Determine where to place the component
-    this.positionComponent(element);
+    if (component.type === 'user-message') {
+      this.startNewTurn();
+      this.positionComponent(element);
+      return;
+    }
+
+    if (!this.turnActive) {
+      // No turn in progress (e.g. starter UI) - render immediately as before
+      this.positionComponent(element);
+      return;
+    }
+
+    const isAnswer = component.type === 'assistant-message' ||
+      (component.type === 'text' && this.expectFinalAnswer && !this.turnAnswerRendered);
+
+    if (isAnswer) {
+      this.positionComponent(element);
+      this.turnAnswerRendered = true;
+
+      // Reveal any technical details gathered so far, right below the answer
+      if (this.technicalWrapper && !this.technicalWrapper.isConnected) {
+        this.positionComponent(this.technicalWrapper);
+      }
+      return;
+    }
+
+    // Everything else (SQL status cards, dataframes, charts, ...) goes into the
+    // collapsed "Technical details" panel instead of appearing inline.
+    this.appendToTechnicalDetails(element);
+  }
+
+  private startNewTurn(): void {
+    // Flush any technical details from a previous turn that never got a rendered answer,
+    // so they aren't silently lost.
+    if (this.technicalWrapper && !this.technicalWrapper.isConnected) {
+      this.positionComponent(this.technicalWrapper);
+    }
+
+    this.turnActive = true;
+    this.turnAnswerRendered = false;
+    this.expectFinalAnswer = false;
+    this.technicalWrapper = null;
+    this.technicalContent = null;
+  }
+
+  private ensureTechnicalWrapper(): HTMLElement {
+    if (!this.technicalContent) {
+      const wrapper = document.createElement('details');
+      wrapper.className = 'technical-details';
+      wrapper.innerHTML = `
+        <summary class="technical-details-summary">
+          <span class="technical-details-icon">▶</span>
+          <span>Technische Details</span>
+        </summary>
+        <div class="technical-details-content"></div>
+      `;
+
+      this.technicalWrapper = wrapper;
+      this.technicalContent = wrapper.querySelector('.technical-details-content');
+
+      // If the answer is already showing, reveal the panel immediately as it fills up
+      if (this.turnAnswerRendered) {
+        this.positionComponent(wrapper);
+      }
+    }
+
+    return this.technicalContent!;
+  }
+
+  private appendToTechnicalDetails(element: HTMLElement): void {
+    const content = this.ensureTechnicalWrapper();
+    content.appendChild(element);
+
+    if (this.turnAnswerRendered) {
+      this.triggerScroll();
+    }
   }
 
   private updateComponent(update: ComponentUpdate): void {
@@ -2030,6 +2114,12 @@ export class ComponentManager {
       (statusBar as any).status = status;
       (statusBar as any).message = message || '';
       (statusBar as any).detail = detail || '';
+
+      // A non-"working" status signals the tool loop is wrapping up - the next
+      // 'text' component for this turn will be the real final answer.
+      if (this.turnActive && status && status !== 'working') {
+        this.expectFinalAnswer = true;
+      }
     }
   }
 
@@ -2087,6 +2177,12 @@ export class ComponentManager {
   }
 
   private updateChatInput(component: RichComponent): void {
+    // Emitted right before the final answer once the backend agent loop finishes -
+    // the next 'text' component for this turn is the real final answer.
+    if (this.turnActive) {
+      this.expectFinalAnswer = true;
+    }
+
     // Find the chat input element - first try shadow DOM, then document
     let chatInput = null;
 

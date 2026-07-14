@@ -1761,6 +1761,60 @@ export const richComponentStyles = css`
     flex: 1;
   }
 
+  /* Technical Details panel (collapsed SQL/table/chart detail below the answer) */
+  .technical-details {
+    margin-bottom: var(--vanna-space-4);
+    border-radius: var(--vanna-border-radius-lg);
+    border: 1px solid var(--vanna-outline-dimmer);
+    background: var(--vanna-background-subtle);
+    overflow: hidden;
+  }
+
+  .technical-details-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--vanna-space-2);
+    padding: var(--vanna-space-3) var(--vanna-space-4);
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--vanna-foreground-dimmer);
+    list-style: none;
+    transition: background var(--vanna-duration-200) ease, color var(--vanna-duration-200) ease;
+  }
+
+  .technical-details-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .technical-details-summary:hover {
+    background: var(--vanna-background-higher);
+    color: var(--vanna-foreground-default);
+  }
+
+  .technical-details-icon {
+    font-size: 0.7rem;
+    display: inline-flex;
+    transition: transform var(--vanna-duration-200) ease;
+  }
+
+  .technical-details[open] .technical-details-icon {
+    transform: rotate(90deg);
+  }
+
+  .technical-details-content {
+    padding: var(--vanna-space-4);
+    border-top: 1px solid var(--vanna-outline-dimmer);
+    display: flex;
+    flex-direction: column;
+    gap: var(--vanna-space-3);
+  }
+
+  .technical-details-content > .rich-component:last-child {
+    margin-bottom: 0;
+  }
+
   /* Button Group Interactive States */
   .rich-button.button-transitioning {
     transition: all 0.2s ease-in-out;
