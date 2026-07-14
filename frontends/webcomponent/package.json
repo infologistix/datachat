@@ -48,10 +48,10 @@
     "@storybook/addon-docs": "^8.6.14",
     "@storybook/addon-essentials": "^8.6.14",
     "@storybook/web-components": "^8.6.14",
-    "@storybook/web-components-vite": "^8.6.14",
+    "@storybook/web-components-vite": "^10.5.0",
     "@types/plotly.js-dist-min": "^2.3.4",
     "storybook": "^8.6.14",
     "typescript": "^5.9.2",
-    "vite": "^7.1.5"
+    "vite": "^8.1.4"
   }
 }
