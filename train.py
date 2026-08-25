@@ -1,5 +1,5 @@
 """
-Training script for Vanna — loads DDL, documentation, and example SQL into ChromaDB.
+Training script for Vanna — loads DDL and domain documentation into ChromaDB.
 
 Usage:
     python train.py                      # Load from all configured sources
@@ -10,9 +10,7 @@ Usage:
 
 import argparse
 import asyncio
-import json
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -21,9 +19,6 @@ from vanna.core.tool import ToolContext
 from vanna.core.user import User
 
 load_dotenv()
-
-KNOWLEDGE_DIR = Path(__file__).parent / "knowledge"
-SQL_EXAMPLES_PATH = KNOWLEDGE_DIR / "sql_examples.json"
 
 # Domain notes that don't belong to any single table - competition/table-naming
 # knowledge an LLM can't infer from DDL alone. Mirrors the equivalent notes in
@@ -180,14 +175,6 @@ def get_bigquery_ddl(project_id: str, cred_file_path: str | None = None) -> list
     return ddl_entries
 
 
-def load_sql_examples() -> list[dict]:
-    """Load curated question/SQL examples from knowledge/sql_examples.json, if present."""
-    if not SQL_EXAMPLES_PATH.exists():
-        return []
-    with SQL_EXAMPLES_PATH.open(encoding="utf-8") as f:
-        return json.load(f)
-
-
 async def train(
     postgres_only: bool = False,
     bigquery_only: bool = False,
@@ -246,26 +233,6 @@ async def train(
         await memory.save_text_memory(content=note, context=ctx)
     total += len(DOMAIN_NOTES)
     print(f"  Loaded {len(DOMAIN_NOTES)} domain notes")
-
-    # Curated question -> SQL examples, so retrieval has real worked examples to
-    # match against instead of just raw DDL.
-    sql_examples = load_sql_examples()
-    if sql_examples:
-        print(f"Loading {len(sql_examples)} curated SQL examples...")
-        for example in sql_examples:
-            await memory.save_tool_usage(
-                question=example["question"],
-                tool_name="run_sql",
-                args={"sql": example["sql"]},
-                context=ctx,
-                metadata={
-                    "tables": example.get("tables", []),
-                    "tags": example.get("tags", []),
-                    "doc": example.get("doc", ""),
-                },
-            )
-        total += len(sql_examples)
-        print(f"  Loaded {len(sql_examples)} SQL examples")
 
     print(f"\nDone! Loaded {total} total entries into ChromaDB.")
 
