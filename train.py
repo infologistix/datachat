@@ -5,11 +5,14 @@ Usage:
     python train.py                      # Load from all configured sources
     python train.py --postgres-only      # Load only PostgreSQL schemas
     python train.py --bigquery-only      # Load only BigQuery schemas
+    python train.py --schemas bronze,gold  # Override TRAIN_SCHEMAS for this run
 """
 
 import argparse
 import asyncio
+import json
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -18,6 +21,36 @@ from vanna.core.tool import ToolContext
 from vanna.core.user import User
 
 load_dotenv()
+
+KNOWLEDGE_DIR = Path(__file__).parent / "knowledge"
+SQL_EXAMPLES_PATH = KNOWLEDGE_DIR / "sql_examples.json"
+
+# Domain notes that don't belong to any single table - competition/table-naming
+# knowledge an LLM can't infer from DDL alone. Mirrors the equivalent notes in
+# the sibling basketball-gpt app's query_engine.py, since both query the same
+# sportsanalytics database.
+DOMAIN_NOTES = [
+    "Table prefixes indicate competitions: b_el = EuroLeague, b_ec = EuroCup, "
+    "b_cl = Champions League, b_bbl = Basketball Bundesliga. boxscore tables are "
+    "usually best for player/team game totals and rankings; playbyplay tables for "
+    "event sequences and possession-level questions; player_info tables for player "
+    "lookup and roster attributes. b_bbl_boxscore uses date_final, home_team_final, "
+    "away_team_final instead of date, home_team, away_team used by the other three "
+    "leagues' boxscore tables.",
+    "bronze.* boxscore/playbyplay tables have NO season column, only a per-game date "
+    "(date_final for BBL). A competition season 'YYYY-(YYYY+1)' runs from around "
+    "August of YYYY to around July of YYYY+1, crossing the calendar-year boundary - "
+    "a question about 'season 2025-2026' or 'season 2025' needs a filter like "
+    "date >= '2025-08-01' AND date < '2026-08-01', never a calendar-year filter "
+    "(date BETWEEN '2025-01-01' AND '2025-12-31'), which silently cuts the season "
+    "in half. gold.g_el_players, g_ec_players, g_cl_players, and g_bbl_players "
+    "already have a saison column formatted like '2025-2026' - prefer filtering "
+    "there over date math whenever the requested stat exists in a gold table.",
+    "When grouping player stats by season, GROUP BY player_name alone, not "
+    "(player_name, team). Several teams have mid-season sponsor renames (the same "
+    "player then has two team-name rows in one season), which silently splits and "
+    "undercounts a renamed team's players if team is in the GROUP BY.",
+]
 
 
 def get_dummy_context(memory: ChromaAgentMemory) -> ToolContext:
@@ -32,22 +65,23 @@ def get_dummy_context(memory: ChromaAgentMemory) -> ToolContext:
     )
 
 
-def get_postgres_ddl(connection_string: str) -> list[dict]:
-    """Extract table DDL from PostgreSQL via information_schema."""
+def get_postgres_ddl(connection_string: str, schemas: list[str]) -> list[dict]:
+    """Extract table DDL from PostgreSQL via information_schema, scoped to `schemas`."""
     import psycopg2
     import psycopg2.extras
 
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Get all user tables
+    # Only the schemas explicitly named - not "every non-system schema", which
+    # would happily pull in public or any future unrelated schema too.
     cursor.execute("""
         SELECT table_schema, table_name
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+        WHERE table_schema = ANY(%s)
           AND table_type = 'BASE TABLE'
         ORDER BY table_schema, table_name
-    """)
+    """, (schemas,))
     tables = cursor.fetchall()
 
     ddl_entries = []
@@ -146,7 +180,20 @@ def get_bigquery_ddl(project_id: str, cred_file_path: str | None = None) -> list
     return ddl_entries
 
 
-async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh: bool = False):
+def load_sql_examples() -> list[dict]:
+    """Load curated question/SQL examples from knowledge/sql_examples.json, if present."""
+    if not SQL_EXAMPLES_PATH.exists():
+        return []
+    with SQL_EXAMPLES_PATH.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+async def train(
+    postgres_only: bool = False,
+    bigquery_only: bool = False,
+    fresh: bool = False,
+    schemas: list[str] | None = None,
+):
     memory = ChromaAgentMemory(
         persist_directory="./chroma_data",
         collection_name="vanna_memory",
@@ -163,7 +210,10 @@ async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh:
     # PostgreSQL
     pg_host = os.getenv("POSTGRES_HOST")
     if pg_host and not bigquery_only:
-        print("Loading PostgreSQL schemas...")
+        pg_schemas = schemas or [
+            s.strip() for s in os.getenv("TRAIN_SCHEMAS", "bronze,silver,gold").split(",") if s.strip()
+        ]
+        print(f"Loading PostgreSQL schemas ({', '.join(pg_schemas)})...")
         pg_conn = (
             f"host={pg_host} "
             f"port={os.getenv('POSTGRES_PORT', '5432')} "
@@ -171,7 +221,7 @@ async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh:
             f"user={os.getenv('POSTGRES_USER')} "
             f"password={os.getenv('POSTGRES_PASSWORD')}"
         )
-        entries = get_postgres_ddl(pg_conn)
+        entries = get_postgres_ddl(pg_conn, pg_schemas)
         for entry in entries:
             await memory.save_text_memory(content=entry["content"], context=ctx)
             print(f"  Saved: {entry['table']}")
@@ -190,19 +240,32 @@ async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh:
         total += len(entries)
         print(f"  Loaded {len(entries)} BigQuery tables")
 
-    # You can add custom documentation and example SQL here:
-    # Example:
-    # await memory.save_text_memory(
-    #     content="The 'orders' table contains all customer orders. "
-    #             "Use order_date for time-based filtering.",
-    #     context=ctx,
-    # )
-    # await memory.save_tool_usage(
-    #     question="How many orders were placed last month?",
-    #     tool_name="run_sql",
-    #     args={"sql": "SELECT COUNT(*) FROM orders WHERE order_date >= NOW() - INTERVAL '1 month'"},
-    #     context=ctx,
-    # )
+    # Domain notes: competition/table-naming knowledge no DDL can express on its own.
+    print("Loading domain notes...")
+    for note in DOMAIN_NOTES:
+        await memory.save_text_memory(content=note, context=ctx)
+    total += len(DOMAIN_NOTES)
+    print(f"  Loaded {len(DOMAIN_NOTES)} domain notes")
+
+    # Curated question -> SQL examples, so retrieval has real worked examples to
+    # match against instead of just raw DDL.
+    sql_examples = load_sql_examples()
+    if sql_examples:
+        print(f"Loading {len(sql_examples)} curated SQL examples...")
+        for example in sql_examples:
+            await memory.save_tool_usage(
+                question=example["question"],
+                tool_name="run_sql",
+                args={"sql": example["sql"]},
+                context=ctx,
+                metadata={
+                    "tables": example.get("tables", []),
+                    "tags": example.get("tags", []),
+                    "doc": example.get("doc", ""),
+                },
+            )
+        total += len(sql_examples)
+        print(f"  Loaded {len(sql_examples)} SQL examples")
 
     print(f"\nDone! Loaded {total} total entries into ChromaDB.")
 
@@ -213,9 +276,17 @@ if __name__ == "__main__":
     parser.add_argument("--postgres-only", action="store_true", help="Load only PostgreSQL schemas")
     parser.add_argument("--bigquery-only", action="store_true", help="Load only BigQuery schemas")
     parser.add_argument("--fresh", action="store_true", help="Clear old data before loading")
+    parser.add_argument("--schemas", help="Comma-separated PostgreSQL schemas to load (overrides TRAIN_SCHEMAS from .env)")
     args = parser.parse_args()
 
     if args.database:
         os.environ["POSTGRES_DATABASE"] = args.database
 
-    asyncio.run(train(postgres_only=args.postgres_only, bigquery_only=args.bigquery_only, fresh=args.fresh))
+    schemas = [s.strip() for s in args.schemas.split(",") if s.strip()] if args.schemas else None
+
+    asyncio.run(train(
+        postgres_only=args.postgres_only,
+        bigquery_only=args.bigquery_only,
+        fresh=args.fresh,
+        schemas=schemas,
+    ))
