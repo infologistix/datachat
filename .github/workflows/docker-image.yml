@@ -34,8 +34,14 @@ jobs:
 
     - name: Build the Docker image
       run: |
-        docker build -t europe-west3-docker.pkg.dev/platform-app-ilx/docker-image-repository/datachat:${{ github.sha }} .
+        REGISTRY=europe-west3-docker.pkg.dev/platform-app-ilx/docker-image-repository/datachat
+        IMG_SHA="${REGISTRY}:${{ github.sha }}"
+        
+        docker build -t "$IMG_SHA" .
+        docker tag "$IMG_SHA" "${REGISTRY}:latest"
 
     - name: docker push
       run: |
-        docker push europe-west3-docker.pkg.dev/platform-app-ilx/docker-image-repository/datachat:${{ github.sha }}
+        REGISTRY=europe-west3-docker.pkg.dev/platform-app-ilx/docker-image-repository/datachat
+        docker push "${REGISTRY}:${{ github.sha }}"
+        docker push "${REGISTRY}:latest"
