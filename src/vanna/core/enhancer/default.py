@@ -70,11 +70,33 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
                 agent_memory=self.agent_memory,
             )
 
-            # Search for relevant text memories based on user message
+            # Search for relevant text memories based on user message.
+            #
+            # similarity_threshold must be 0.0 here, not the 0.7 default.
+            # ChromaAgentMemory computes similarity as max(0, 1 - distance),
+            # which only maps to a [0,1] score for COSINE distance. The
+            # collection is created with Chroma's default L2 (squared
+            # euclidean) metric, where distances routinely exceed 1 - so
+            # 1 - distance goes negative, clamps to 0, and every result is
+            # rejected by any threshold above 0. Measured on the live store:
+            # the best match for "what is top score of bbl last season" is
+            # bronze.b_bbl_boxscore at L2 distance 1.31 -> score 0.0.
+            #
+            # The ranking itself is correct (Chroma orders by distance and
+            # returns the right tables first); it was only the threshold
+            # discarding them, leaving the agent with no schema context at
+            # all. With 0.0 we keep Chroma's top-N ordering and filter
+            # nothing.
+            #
+            # Note this means no relevance filtering: an off-topic question
+            # still pulls in the 5 nearest tables. Fixing that properly needs
+            # the collection created with hnsw:space=cosine, where relevant
+            # matches score ~0.31-0.47 and unrelated ones ~0.15, making a
+            # real threshold (~0.25) possible.
             memories: List[
                 "TextMemorySearchResult"
             ] = await self.agent_memory.search_text_memories(
-                query=user_message, context=context, limit=5
+                query=user_message, context=context, limit=5, similarity_threshold=0.0
             )
 
             if not memories:
