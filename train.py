@@ -1,5 +1,9 @@
 """
-Training script for Vanna — loads DDL and domain documentation into ChromaDB.
+Training script for Vanna — loads table DDL into ChromaDB.
+
+Everything loaded here is read from the database itself (information_schema):
+table names, columns, types, nullability, defaults, and primary keys. No
+hand-written domain knowledge is injected.
 
 Usage:
     python train.py                      # Load from all configured sources
@@ -19,34 +23,6 @@ from vanna.core.tool import ToolContext
 from vanna.core.user import User
 
 load_dotenv()
-
-# Domain notes that don't belong to any single table - competition/table-naming
-# knowledge an LLM can't infer from DDL alone. Mirrors the equivalent notes in
-# the sibling basketball-gpt app's query_engine.py, since both query the same
-# sportsanalytics database.
-DOMAIN_NOTES = [
-    "Table prefixes indicate competitions: b_el = EuroLeague, b_ec = EuroCup, "
-    "b_cl = Champions League, b_bbl = Basketball Bundesliga. boxscore tables are "
-    "usually best for player/team game totals and rankings; playbyplay tables for "
-    "event sequences and possession-level questions; player_info tables for player "
-    "lookup and roster attributes. b_bbl_boxscore uses date_final, home_team_final, "
-    "away_team_final instead of date, home_team, away_team used by the other three "
-    "leagues' boxscore tables.",
-    "bronze.* boxscore/playbyplay tables have NO season column, only a per-game date "
-    "(date_final for BBL). A competition season 'YYYY-(YYYY+1)' runs from around "
-    "August of YYYY to around July of YYYY+1, crossing the calendar-year boundary - "
-    "a question about 'season 2025-2026' or 'season 2025' needs a filter like "
-    "date >= '2025-08-01' AND date < '2026-08-01', never a calendar-year filter "
-    "(date BETWEEN '2025-01-01' AND '2025-12-31'), which silently cuts the season "
-    "in half. gold.g_el_players, g_ec_players, g_cl_players, and g_bbl_players "
-    "already have a saison column formatted like '2025-2026' - prefer filtering "
-    "there over date math whenever the requested stat exists in a gold table.",
-    "When grouping player stats by season, GROUP BY player_name alone, not "
-    "(player_name, team). Several teams have mid-season sponsor renames (the same "
-    "player then has two team-name rows in one season), which silently splits and "
-    "undercounts a renamed team's players if team is in the GROUP BY.",
-]
-
 
 def get_dummy_context(memory: ChromaAgentMemory) -> ToolContext:
     """Create a minimal ToolContext for training operations."""
@@ -95,6 +71,25 @@ def get_postgres_ddl(connection_string: str, schemas: list[str]) -> list[dict]:
         """, (schema, name))
         columns = cursor.fetchall()
 
+        # Primary key, when one is declared. Only a minority of tables have one:
+        # dbt's materialized='table' does CREATE TABLE AS SELECT on every run,
+        # which drops constraints, so most of silver/gold has none. Where a PK
+        # does exist it states the table's grain (e.g. boxscore is keyed on
+        # (date, home_team, player_name) - one row per player per game), which
+        # is exactly the kind of thing a column list alone does not convey.
+        cursor.execute("""
+            SELECT kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.constraint_schema = kcu.constraint_schema
+             AND tc.table_name = kcu.table_name
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_schema = %s AND tc.table_name = %s
+            ORDER BY kcu.ordinal_position
+        """, (schema, name))
+        pk_cols = [r["column_name"] for r in cursor.fetchall()]
+
         # Build DDL string
         col_defs = []
         for col in columns:
@@ -106,6 +101,9 @@ def get_postgres_ddl(connection_string: str, schemas: list[str]) -> list[dict]:
             if col["column_default"]:
                 col_def += f" DEFAULT {col['column_default']}"
             col_defs.append(col_def)
+
+        if pk_cols:
+            col_defs.append(f"  PRIMARY KEY ({', '.join(pk_cols)})")
 
         ddl = f"CREATE TABLE {full_name} (\n" + ",\n".join(col_defs) + "\n);"
 
@@ -226,13 +224,6 @@ async def train(
             print(f"  Saved: {entry['table']}")
         total += len(entries)
         print(f"  Loaded {len(entries)} BigQuery tables")
-
-    # Domain notes: competition/table-naming knowledge no DDL can express on its own.
-    print("Loading domain notes...")
-    for note in DOMAIN_NOTES:
-        await memory.save_text_memory(content=note, context=ctx)
-    total += len(DOMAIN_NOTES)
-    print(f"  Loaded {len(DOMAIN_NOTES)} domain notes")
 
     print(f"\nDone! Loaded {total} total entries into ChromaDB.")
 
