@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from vanna.core.agent import Agent
+from vanna.core.agent import Agent, AgentConfig
 from vanna.core.registry import ToolRegistry
 from vanna.core.user import User
 from vanna.core.user.resolver import UserResolver
@@ -126,12 +126,19 @@ Response Guidelines:
 - Use the available tools to help the user accomplish their goals.""")
 
     # Agent
+    # Tool-call budget per question. The library default is 10, which questions
+    # spanning several tables can exhaust before reaching an answer - the agent
+    # then stops with "Tool Execution Limit Reached" instead of responding.
+    # Configurable so it can be tuned without a rebuild.
+    max_tool_iterations = int(os.getenv("MAX_TOOL_ITERATIONS", "20"))
+
     agent = Agent(
         llm_service=llm,
         tool_registry=tools,
         user_resolver=LocalUserResolver(),
         agent_memory=memory,
         system_prompt_builder=system_prompt_builder,
+        config=AgentConfig(max_tool_iterations=max_tool_iterations),
     )
 
     # Schema explorer endpoint
