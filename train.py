@@ -1,10 +1,15 @@
 """
-Training script for Vanna — loads DDL, documentation, and example SQL into ChromaDB.
+Training script for Vanna — loads table DDL into ChromaDB.
+
+Everything loaded here is read from the database itself (information_schema):
+table names, columns, types, nullability, defaults, and primary keys. No
+hand-written domain knowledge is injected.
 
 Usage:
     python train.py                      # Load from all configured sources
     python train.py --postgres-only      # Load only PostgreSQL schemas
     python train.py --bigquery-only      # Load only BigQuery schemas
+    python train.py --schemas bronze,gold  # Override TRAIN_SCHEMAS for this run
 """
 
 import argparse
@@ -19,7 +24,6 @@ from vanna.core.user import User
 
 load_dotenv()
 
-
 def get_dummy_context(memory: ChromaAgentMemory) -> ToolContext:
     """Create a minimal ToolContext for training operations."""
     user = User(id="trainer", username="trainer", group_memberships=["admin"])
@@ -32,22 +36,23 @@ def get_dummy_context(memory: ChromaAgentMemory) -> ToolContext:
     )
 
 
-def get_postgres_ddl(connection_string: str) -> list[dict]:
-    """Extract table DDL from PostgreSQL via information_schema."""
+def get_postgres_ddl(connection_string: str, schemas: list[str]) -> list[dict]:
+    """Extract table DDL from PostgreSQL via information_schema, scoped to `schemas`."""
     import psycopg2
     import psycopg2.extras
 
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Get all user tables
+    # Only the schemas explicitly named - not "every non-system schema", which
+    # would happily pull in public or any future unrelated schema too.
     cursor.execute("""
         SELECT table_schema, table_name
         FROM information_schema.tables
-        WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+        WHERE table_schema = ANY(%s)
           AND table_type = 'BASE TABLE'
         ORDER BY table_schema, table_name
-    """)
+    """, (schemas,))
     tables = cursor.fetchall()
 
     ddl_entries = []
@@ -66,6 +71,25 @@ def get_postgres_ddl(connection_string: str) -> list[dict]:
         """, (schema, name))
         columns = cursor.fetchall()
 
+        # Primary key, when one is declared. Only a minority of tables have one:
+        # dbt's materialized='table' does CREATE TABLE AS SELECT on every run,
+        # which drops constraints, so most of silver/gold has none. Where a PK
+        # does exist it states the table's grain (e.g. boxscore is keyed on
+        # (date, home_team, player_name) - one row per player per game), which
+        # is exactly the kind of thing a column list alone does not convey.
+        cursor.execute("""
+            SELECT kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.constraint_schema = kcu.constraint_schema
+             AND tc.table_name = kcu.table_name
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_schema = %s AND tc.table_name = %s
+            ORDER BY kcu.ordinal_position
+        """, (schema, name))
+        pk_cols = [r["column_name"] for r in cursor.fetchall()]
+
         # Build DDL string
         col_defs = []
         for col in columns:
@@ -77,6 +101,9 @@ def get_postgres_ddl(connection_string: str) -> list[dict]:
             if col["column_default"]:
                 col_def += f" DEFAULT {col['column_default']}"
             col_defs.append(col_def)
+
+        if pk_cols:
+            col_defs.append(f"  PRIMARY KEY ({', '.join(pk_cols)})")
 
         ddl = f"CREATE TABLE {full_name} (\n" + ",\n".join(col_defs) + "\n);"
 
@@ -146,7 +173,12 @@ def get_bigquery_ddl(project_id: str, cred_file_path: str | None = None) -> list
     return ddl_entries
 
 
-async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh: bool = False):
+async def train(
+    postgres_only: bool = False,
+    bigquery_only: bool = False,
+    fresh: bool = False,
+    schemas: list[str] | None = None,
+):
     memory = ChromaAgentMemory(
         persist_directory="./chroma_data",
         collection_name="vanna_memory",
@@ -163,7 +195,10 @@ async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh:
     # PostgreSQL
     pg_host = os.getenv("POSTGRES_HOST")
     if pg_host and not bigquery_only:
-        print("Loading PostgreSQL schemas...")
+        pg_schemas = schemas or [
+            s.strip() for s in os.getenv("TRAIN_SCHEMAS", "bronze,silver,gold").split(",") if s.strip()
+        ]
+        print(f"Loading PostgreSQL schemas ({', '.join(pg_schemas)})...")
         pg_conn = (
             f"host={pg_host} "
             f"port={os.getenv('POSTGRES_PORT', '5432')} "
@@ -171,7 +206,7 @@ async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh:
             f"user={os.getenv('POSTGRES_USER')} "
             f"password={os.getenv('POSTGRES_PASSWORD')}"
         )
-        entries = get_postgres_ddl(pg_conn)
+        entries = get_postgres_ddl(pg_conn, pg_schemas)
         for entry in entries:
             await memory.save_text_memory(content=entry["content"], context=ctx)
             print(f"  Saved: {entry['table']}")
@@ -190,20 +225,6 @@ async def train(postgres_only: bool = False, bigquery_only: bool = False, fresh:
         total += len(entries)
         print(f"  Loaded {len(entries)} BigQuery tables")
 
-    # You can add custom documentation and example SQL here:
-    # Example:
-    # await memory.save_text_memory(
-    #     content="The 'orders' table contains all customer orders. "
-    #             "Use order_date for time-based filtering.",
-    #     context=ctx,
-    # )
-    # await memory.save_tool_usage(
-    #     question="How many orders were placed last month?",
-    #     tool_name="run_sql",
-    #     args={"sql": "SELECT COUNT(*) FROM orders WHERE order_date >= NOW() - INTERVAL '1 month'"},
-    #     context=ctx,
-    # )
-
     print(f"\nDone! Loaded {total} total entries into ChromaDB.")
 
 
@@ -213,9 +234,17 @@ if __name__ == "__main__":
     parser.add_argument("--postgres-only", action="store_true", help="Load only PostgreSQL schemas")
     parser.add_argument("--bigquery-only", action="store_true", help="Load only BigQuery schemas")
     parser.add_argument("--fresh", action="store_true", help="Clear old data before loading")
+    parser.add_argument("--schemas", help="Comma-separated PostgreSQL schemas to load (overrides TRAIN_SCHEMAS from .env)")
     args = parser.parse_args()
 
     if args.database:
         os.environ["POSTGRES_DATABASE"] = args.database
 
-    asyncio.run(train(postgres_only=args.postgres_only, bigquery_only=args.bigquery_only, fresh=args.fresh))
+    schemas = [s.strip() for s in args.schemas.split(",") if s.strip()] if args.schemas else None
+
+    asyncio.run(train(
+        postgres_only=args.postgres_only,
+        bigquery_only=args.bigquery_only,
+        fresh=args.fresh,
+        schemas=schemas,
+    ))
