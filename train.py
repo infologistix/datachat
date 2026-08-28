@@ -225,55 +225,6 @@ async def train(
         total += len(entries)
         print(f"  Loaded {len(entries)} BigQuery tables")
 
-    await memory.save_text_memory(
-        content=(
-            "Tables use two prefixes: a data layer prefix and a league prefix, e.g. 'b_el_playbyplay'. "
-            "Layer prefixes: 'b_' = Bronze (raw), 's_' = Silver (cleansed), 'g_' = Gold (aggregated for BI). "
-            "League prefixes: 'el_' = Euroleague, 'bbl_' = Bundesliga, 'ec_' = Eurocup, 'cl_' = Championsleague. "
-            "Gold-layer tables without a league prefix contain data spanning several leagues."
-        ),
-        context=ctx,
-    )
-    print("Saved: table prefix convention")
-    total += 1
-
-    await memory.save_text_memory(
-        content=(
-            "Tables sharing the same name after the league prefix hold the same kind of data across leagues, "
-            "e.g. 'b_el_playbyplay' and 'b_bbl_playbyplay' both contain play-by-play data for their respective league."
-        ),
-        context=ctx,
-    )
-    print("Saved: cross-league table naming convention")
-    total += 1
-
-    await memory.save_text_memory(
-        content="If the user does not specify a league, default to Bundesliga (BBL).",
-        context=ctx,
-    )
-    print("Saved: default league rule")
-    total += 1
-
-    await memory.save_text_memory(
-        content=(
-            "If a season is not specified, default to the most recent season. "
-            "Do not query across multiple seasons unless explicitly asked to."
-        ),
-        context=ctx,
-    )
-    print("Saved: default season rule")
-    total += 1
-
-    await memory.save_text_memory(
-        content=(
-            "A season ends at July 1st of each year"
-            "A new season begins on September 1st of each year"
-            "So the saison 2025-2026 ranges from 2025-09-01 to 2026-07-01"
-        ),
-        context=ctx,
-    )
-    print("Saved: Season definition")
-
     print(f"\nDone! Loaded {total} total entries into ChromaDB.")
 
 
