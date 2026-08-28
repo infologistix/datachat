@@ -23,6 +23,7 @@ from vanna.integrations.chromadb.agent_memory import ChromaAgentMemory
 from vanna.integrations.postgres.sql_runner import PostgresRunner
 from vanna.integrations.bigquery.sql_runner import BigQueryRunner
 from vanna.tools.run_sql import RunSqlTool
+from vanna.tools.agent_memory import SearchSavedCorrectToolUsesTool
 from vanna.tools.visualize_data import VisualizeDataTool
 from vanna.core.system_prompt import DefaultSystemPromptBuilder
 from vanna.servers.base import ChatHandler
@@ -107,6 +108,8 @@ def create_app() -> FastAPI:
             access_groups=[],
         )
 
+    tools.register_local_tool(SearchSavedCorrectToolUsesTool(), access_groups=["admin"])
+    
     # Visualization
     tools.register_local_tool(VisualizeDataTool(), access_groups=[])
 
