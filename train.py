@@ -225,6 +225,77 @@ async def train(
         total += len(entries)
         print(f"  Loaded {len(entries)} BigQuery tables")
 
+    # You can add custom documentation and example SQL here:
+    # Example:
+    # await memory.save_text_memory(
+    #     content="The 'orders' table contains all customer orders. "
+    #             "Use order_date for time-based filtering.",
+    #     context=ctx,
+    # )
+
+    await memory.save_tool_usage(
+        question="Welcher Bundesliga Spieler hat die meisten Punkte aus der Saison 2025-2026?",
+        tool_name="run_sql",
+        args={"sql": """
+                SELECT player_name, player_team, pts_ges
+                FROM (
+                SELECT player_name,
+                    player_team,
+                    SUM(pts) AS  pts_ges,
+                    RANK() OVER (ORDER BY SUM(pts) DESC) AS rnk
+                FROM bronze.b_bbl_boxscore
+                WHERE date_final >= '2025-07-15' AND date_final < '2026-07-15'
+                GROUP BY player_name, player_team
+                ) t
+                WHERE rnk = 1;  
+        """},
+        context=ctx
+    )
+
+    await memory.save_tool_usage(
+        question="Welche Bundesliga Mannschaft hat die meisten Rebounds in der Saison 2025-2026?",
+        tool_name="run_sql",
+        args={"sql": """
+            WITH teams AS (
+                SELECT home_team_final AS team, orb,drb
+                FROM bronze.b_bbl_boxscore
+                WHERE date_final >= '2025-07-15' AND date_final < '2026-07-15'
+                UNION ALL
+                SELECT away_team_final AS team, orb,drb
+                FROM bronze.b_bbl_boxscore
+                WHERE date_final >= '2025-07-15' AND date_final < '2026-07-15'
+            ),
+            team_sum_reb AS (
+                SELECT
+                    team,
+                    SUM(orb) AS orb_ges,
+                    SUM(drb) AS drb_ges
+                FROM teams
+                GROUP BY team
+            )
+            SELECT
+                team,
+                REB_ges
+            FROM (
+                SELECT
+                    team,
+                    orb_ges+drb_ges as REB_GES,
+                    ROW_NUMBER() OVER (ORDER BY orb_ges DESC) AS rn
+                FROM team_sum_reb
+            ) t
+            WHERE rn <= 5
+            ORDER BY rn;
+        """},
+        context=ctx
+    )
+
+    # await memory.save_tool_usage(
+    #     question="How many orders were placed last month?",
+    #     tool_name="run_sql",
+    #     args={"sql": "SELECT COUNT(*) FROM orders WHERE order_date >= NOW() - INTERVAL '1 month'"},
+    #     context=ctx,
+    # )
+
     print(f"\nDone! Loaded {total} total entries into ChromaDB.")
 
 
