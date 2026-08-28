@@ -172,6 +172,23 @@ def get_bigquery_ddl(project_id: str, cred_file_path: str | None = None) -> list
 
     return ddl_entries
 
+import uuid
+from datetime import datetime
+
+def save_tagged_memory(memory, content: str, memory_type: str):
+    """Save a text memory with a memory_type tag ('rule' or 'ddl')."""
+    collection = memory._get_collection()
+    memory_id = str(uuid.uuid4())
+    collection.upsert(
+        ids=[memory_id],
+        documents=[content],
+        metadatas=[{
+            "content": content,
+            "timestamp": datetime.now().isoformat(),
+            "is_text_memory": True,
+            "memory_type": memory_type,
+        }],
+    )
 
 async def train(
     postgres_only: bool = False,
@@ -266,9 +283,8 @@ async def train(
 
     await memory.save_text_memory(
         content=(
-            "A season ends at July 1st of each year"
-            "A new season begins on September 1st of each year"
-            "So the saison 2025-2026 ranges from 2025-09-01 to 2026-07-01"
+            "A season ends and a new season begins at July 15th of each year"
+            "So the saison 2025-2026 ranges from 2025-07-15 to 2026-07-15"
         ),
         context=ctx,
     )
