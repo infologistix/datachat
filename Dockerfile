@@ -16,9 +16,9 @@ WORKDIR /app
 
 # psycopg2-binary + build deps for any packages without wheels
 RUN groupadd -g 1000 appgroup && \
-    useradd -r -u 1000 -g 1000 -m -s /bin/bash appuser
+    useradd -r -u 1000 -g 1000 -m -s /bin/bash appuser \
     apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
+        libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
