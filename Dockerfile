@@ -12,6 +12,10 @@ RUN npm run build
 # --- Stage 2: python runtime ---
 FROM python:3.12-slim AS runtime
 
+RUN groupadd -g 1000 appgroup && \
+    useradd -r -u 1000 -g 1000 -m -s /bin/bash appuser
+USER 1000
+
 WORKDIR /app
 
 # psycopg2-binary + build deps for any packages without wheels
@@ -23,7 +27,7 @@ COPY pyproject.toml README.md ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir ".[gemini,postgres,chromadb,fastapi,openai]" python-dotenv
 
-COPY main.py train.py ./
+COPY *.py ./
 COPY --from=frontend-build /app/frontends/webcomponent/dist ./frontends/webcomponent/dist
 
 ENV HOST=0.0.0.0 \

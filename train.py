@@ -264,6 +264,16 @@ async def train(
     print("Saved: default season rule")
     total += 1
 
+    await memory.save_text_memory(
+        content=(
+            "A season ends at July 1st of each year"
+            "A new season begins on September 1st of each year"
+            "So the saison 2025-2026 ranges from 2025-09-01 to 2026-07-01"
+        ),
+        context=ctx,
+    )
+    print("Saved: Season definition")
+
     print(f"\nDone! Loaded {total} total entries into ChromaDB.")
 
 
