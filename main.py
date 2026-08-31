@@ -23,7 +23,7 @@ from vanna.integrations.chromadb.agent_memory import ChromaAgentMemory
 from vanna.integrations.postgres.sql_runner import PostgresRunner
 from vanna.integrations.bigquery.sql_runner import BigQueryRunner
 from vanna.tools.run_sql import RunSqlTool
-from vanna.tools.agent_memory import SearchSavedCorrectToolUsesTool
+from vanna.tools.agent_memory import SearchSavedCorrectToolUsesTool, SaveQuestionToolArgsTool
 from vanna.tools.visualize_data import VisualizeDataTool
 from vanna.core.system_prompt import DefaultSystemPromptBuilder
 from vanna.servers.base import ChatHandler
@@ -108,14 +108,25 @@ def create_app() -> FastAPI:
             access_groups=[],
         )
 
-    tools.register_local_tool(SearchSavedCorrectToolUsesTool(), access_groups=["admin"])
+    tools.register_local_tool(SearchSavedCorrectToolUsesTool(), access_groups=[])
+    tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=[])
     
     # Visualization
     tools.register_local_tool(VisualizeDataTool(), access_groups=[])
 
     # System prompt — tell the agent what database it's connected to
     db_name = os.getenv("POSTGRES_DATABASE", "unknown")
-    system_prompt_builder = DefaultSystemPromptBuilder(base_prompt=f"""You are Zebrix, an AI basketball analyst assistant. Today's date is {__import__('datetime').date.today()}.
+
+    class CombinedSystemPromptBuilder(DefaultSystemPromptBuilder):
+        def __init__(self, custom_context: str):
+            super().__init__(base_prompt=None)  
+            self.custom_context = custom_context
+
+        async def build_system_prompt(self, user, tools):
+            generated = await super().build_system_prompt(user, tools) 
+            return (generated or "") + "\n\n" + self.custom_context 
+    
+    system_prompt_builder = CombinedSystemPromptBuilder(custom_context=f"""You are Zebrix, an AI basketball analyst assistant. Today's date is {__import__('datetime').date.today()}. # type: ignore # pyright: ignore[reportCallIssue]
 
     DATABASE: You are connected to a PostgreSQL database named '{db_name}'.
     - Use PostgreSQL syntax for all SQL queries.
