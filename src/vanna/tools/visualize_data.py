@@ -89,8 +89,19 @@ class VisualizeDataTool(Tool[VisualizeDataArgs]):
             # Create result message
             row_count = len(df)
             col_count = len(df.columns)
-            result = f"Created visualization from '{args.filename}' ({row_count} rows, {col_count} columns)."
 
+            # Determine the chart type Plotly actually chose
+            chart_data = chart_dict.get("data", [])
+            actual_chart_type = chart_data[0].get("type", "chart") if chart_data else "chart"
+
+            # Create result message
+            row_count = len(df)
+            col_count = len(df.columns)
+            result = (
+                f"Created a {actual_chart_type} visualization from '{args.filename}' "
+                f"({row_count} rows, {col_count} columns). Report this exact chart type "
+                f"to the user, not whatever type they originally requested."
+            )
             # Create ChartComponent
             logger.info("Creating ChartComponent...")
             chart_component = ChartComponent(
@@ -117,6 +128,7 @@ class VisualizeDataTool(Tool[VisualizeDataArgs]):
                     "rows": row_count,
                     "columns": col_count,
                     "chart": chart_dict,
+                    "chart_type": actual_chart_type,                    
                 },
             )
             logger.info("ToolResult created successfully")
