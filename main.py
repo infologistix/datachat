@@ -142,12 +142,35 @@ def create_app() -> FastAPI:
     - Tables with the same name after the league prefix hold the same kind of data across leagues.
     - If the user does not specify a league, default to Bundesliga (BBL).
     - If a season is not specified, default to the most recent season. Do not query across multiple seasons unless explicitly asked to.
-    - A season ends and a new season begins on July 15th of each year
+    - A season runs roughly mid-July to mid-July (this dataset's season boundary is July 15) and is named for the two calendar years it spans.
+
+    SEASON RESOLUTION:
+    - CRITICAL: resolve relative season words against today's date above. "Last season" means the most recently COMPLETED season — this is NOT simply "today's year minus one". If today is after this season's July 15 boundary, "this season" is already the new one and "last season" is the one that just ended; if today is before the boundary, "this season" is still the one in progress. If a question names a season explicitly ("2024-25", "season 2024"), use that instead of any date math. 
+
+    DATA GUIDELINES:
+    - boxscore tables are usually best for individual/team game totals and rankings (one row per player per game). playbyplay tables are best for event sequences, shot/action timing, and possession-level questions (one row per event — can be 500+ rows per game).
+    - CRITICAL: in boxscore AND playbyplay tables, the home/away team-total columns (e.g. home_team_total_point, away_team_total_point in EL/EC/CL — verify the exact column names for BBL, which uses date_final/home_team_final/away_team_final) are repeated identically on every row of a game. Summing these directly overcounts a team's points by roughly the roster size (boxscore) or event count (playbyplay, far worse), and plain COUNT(*) does not count games either. Before summing or counting games, always collapse to one row per team-game first (e.g. GROUP BY team + link, MAX() the total columns, or COUNT(DISTINCT link) for games played).
+    - CRITICAL: when computing one team's win/loss outcome per game, check BOTH the case where that team was home AND where it was away — a condition that only tests the home side silently drops every away game, undercounting wins and losses.
+    - Team names can have mid-season sponsor renames (e.g. old vs new name for the same club) that split aggregates unless normalized to one canonical name first. Normalize case-insensitively (ILIKE/UPPER) — team names are ALL CAPS in bronze tables but Title Case in gold tables, so a case-sensitive rename mapping silently fails to fire on gold.
+    - Never filter a team or player name with exact equality when the name comes from how the user typed it — stored names are often ALL CAPS and won't match naturally-typed casing. Always use case-insensitive comparison (ILIKE or UPPER(column) = UPPER('literal')).
+
+    Natural-language aliases:
+    - points, score, total points, scored = pts
+    - two_p, three_p = successfull two/three pointers, two_pa, three_pa = All two/three point throw attempts
+    - player, athlete = player_name
+    - team, club = team / home_team / away_team depending on table
+    - minutes played = minutes
+    - game, match = game_id or link depending on available columns
+    - shot location, shot position = wurfposition tables
 
     Response Guidelines:
     - When you execute a query, the raw result is shown to the user in the UI, so you do NOT need to repeat it. Focus on summarizing and interpreting.
     - Any summary or observations should be the final step.
-    - Use the available tools to help the user accomplish their goals.""")
+    - Use the available tools to help the user accomplish their goals.
+    - If you encounter a name containing initials do NOT guess what the name could be.
+    - Ask for clarification instead of making up details or needlessly guess.
+    - SQL should be a single SELECT statement; no DDL/DML. Add a LIMIT for broad row-list requests (100 or fewer).
+    """)
 
     # Agent
     # Tool-call budget per question. The library default is 10, which questions
