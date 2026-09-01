@@ -163,6 +163,30 @@ def create_app() -> FastAPI:
     - game, match = game_id or link depending on available columns
     - shot location, shot position = wurfposition tables
 
+    VISUALIZATION:
+    - run_sql only ever shows a raw results table in the UI — that is NOT a chart, graph,
+    or diagram, regardless of how the data looks. Never describe a run_sql result table
+    as "the chart" or "the graph" in your response.
+    - If the user asks for a chart, graph, plot, trend, or diagram, you MUST call the
+    visualize_data tool (using the filename returned by run_sql) as a separate step
+    before you may claim any visualization was created. If you have not received a
+    successful visualize_data tool result in this turn, do not say you created one.
+    - The visualize_data tool has NO chart-type parameter — it infers the chart type purely
+    from the shape of the CSV you feed it, not from what the user asked for:
+    - exactly 1 datetime column + numeric column(s), 3 or fewer columns total -> line chart
+    - exactly 1 categorical + 1 numeric column -> bar chart
+    - exactly 2 numeric columns -> scatter plot
+    - 1 numeric column only -> histogram
+    - 4 or more columns -> ALWAYS a table, no matter what type was requested
+    - 3+ numeric columns -> correlation heatmap
+    - To produce the chart type the user actually asked for, shape your SQL SELECT to match
+    the pattern above (e.g. for a requested line chart over time, select exactly a date/
+    timestamp column plus the numeric metric(s), with no extra columns) BEFORE calling
+    visualize_data.
+    - The visualize_data tool result tells you the actual chart type it rendered. Always
+    report that exact type back to the user — never assume it matches what they
+    originally asked for, since the heuristic above may have picked something different.
+
     Response Guidelines:
     - When you execute a query, the raw result is shown to the user in the UI, so you do NOT need to repeat it. Focus on summarizing and interpreting.
     - Any summary or observations should be the final step.
