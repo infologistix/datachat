@@ -177,7 +177,9 @@ class ChromaAgentMemory(AgentMemory):
         def _save():
             collection = self._get_collection()
 
-            memory_id = self._create_memory_id()
+            # memory_id = self._create_memory_id()
+            memory_id = "tool-" + hashlib.sha256(question.encode()).hexdigest()[:16]
+
             timestamp = datetime.now().isoformat()
 
             # ChromaDB only accepts primitive types in metadata
@@ -336,7 +338,8 @@ class ChromaAgentMemory(AgentMemory):
         def _save():
             collection = self._get_collection()
 
-            memory_id = self._create_memory_id()
+            # memory_id = self._create_memory_id()
+            memory_id = "text-" + hashlib.sha256(content.encode()).hexdigest()[:16]
             timestamp = datetime.now().isoformat()
 
             memory_data = {
