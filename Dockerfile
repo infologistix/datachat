@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir ".[gemini,postgres,chromadb,fastapi,openai]" pyth
 
 COPY *.py ./
 COPY --from=frontend-build /app/frontends/webcomponent/dist ./frontends/webcomponent/dist
+COPY ./memories
     
 USER 1000
 

@@ -1,0 +1,59 @@
+examples:
+  - question: "Welche Bundesliga Mannschaft hat die meisten Rebounds in der Saison 2025-2026?"
+    sql: |
+      WITH teams AS (
+          SELECT
+              home_team_final AS team,
+              orb,
+              drb
+          FROM bronze.b_bbl_boxscore
+          WHERE date_final >= '2025-07-15'
+            AND date_final < '2026-07-15'
+          UNION ALL
+          SELECT
+              away_team_final AS team,
+              orb,
+              drb
+          FROM bronze.b_bbl_boxscore
+          WHERE date_final >= '2025-07-15'
+            AND date_final < '2026-07-15'
+      ),
+      team_sum_reb AS (
+          SELECT
+              team,
+              SUM(orb) AS orb_ges,
+              SUM(drb) AS drb_ges
+          FROM teams
+          GROUP BY team
+      )
+      SELECT
+          team,
+          REB_GES
+      FROM (
+          SELECT
+              team,
+              orb_ges + drb_ges AS REB_GES,
+              ROW_NUMBER() OVER (ORDER BY orb_ges DESC) AS rn
+          FROM team_sum_reb
+      ) t
+      WHERE rn <= 5
+      ORDER BY rn;
+
+  - question: "Welcher Spieler in der Bundesliga hat die meisten Punkte erzielt in der Saison 2025-2026?"
+    sql: |
+      SELECT
+          player_name,
+          player_team,
+          pts_ges
+      FROM (
+          SELECT
+              player_name,
+              player_team,
+              SUM(pts) AS pts_ges,
+              RANK() OVER (ORDER BY SUM(pts) DESC) AS rnk
+          FROM bronze.b_bbl_boxscore
+          WHERE date_final >= '2025-07-15'
+            AND date_final < '2026-07-15'
+          GROUP BY player_name, player_team
+      ) t
+      WHERE rnk = 1;
