@@ -73,7 +73,7 @@ persistence:
 # Non-secret configuration, rendered into a ConfigMap and loaded via envFrom.
 env:
   llmProvider: openai
-  openaiModel: qwen3.6-35b-a3b
+  openaiModel: qwen3.8-27b
   openaiBaseUrl: http://litellm.litellm.svc.cluster.local:4000/v1
   postgresHost: ""
   postgresPort: "5432"
